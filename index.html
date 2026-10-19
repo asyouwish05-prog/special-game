@@ -81,7 +81,7 @@
       height: 100%;
       width: 0%;
       background: linear-gradient(90deg, #ff758c, #ff4d6d);
-      transition: width 0.08s ease;
+      transition: width 0.06s ease;
     }
     .tap-btn {
       width: 140px;
@@ -98,7 +98,7 @@
       outline: none;
       -webkit-tap-highlight-color: transparent;
     }
-    .tap-btn:active, .tap-btn.pressed {
+    .tap-btn:active {
       transform: translateY(4px);
       box-shadow: 0 2px 0 #222;
     }
@@ -109,35 +109,61 @@
       font-weight: bold;
     }
 
-    /* 結果モーダル */
+    /* 結果モーダル（上部に寄せて連打位置と被らないように配置） */
     .modal-overlay {
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.5);
+      background: rgba(0, 0, 0, 0.55);
       justify-content: center;
-      align-items: center;
-      padding: 20px;
+      align-items: flex-start; /* 上部配置で誤タップ回避 */
+      padding: 36px 20px 20px;
       z-index: 100;
     }
     .modal-card {
       background: #fff;
-      padding: 28px 20px;
+      padding: 22px 20px 26px;
       border-radius: 20px;
       border: 3px solid #222;
       box-shadow: 0 8px 0 #222;
       text-align: center;
       max-width: 320px;
       width: 100%;
+      animation: slideDown 0.25s ease-out;
+    }
+    @keyframes slideDown {
+      0% { transform: translateY(-20px); opacity: 0; }
+      100% { transform: translateY(0); opacity: 1; }
+    }
+    /* ボタンをモーダル上部に配置してさらに誤タップ防止 */
+    .modal-top-bar {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 12px;
+    }
+    .close-btn {
+      background: #222;
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 99px;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 0.8rem;
+      transition: opacity 0.2s;
+    }
+    .close-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
     }
     .result-badge {
       display: inline-block;
-      padding: 4px 14px;
+      padding: 5px 16px;
       border-radius: 99px;
       background: #ffe3e8;
       color: #ff4d6d;
       font-weight: bold;
-      font-size: 0.9rem;
+      font-size: 0.95rem;
       margin-bottom: 10px;
     }
     .time-record {
@@ -148,35 +174,24 @@
     .time-record span {
       font-weight: bold;
       color: #222;
-      font-size: 1.4rem;
+      font-size: 1.45rem;
     }
     .message-box {
       background: #fafafa;
       border: 2px dashed #ff4d6d;
       border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 18px;
+      padding: 18px 14px;
     }
     .msg-text {
-      font-size: 1.3rem;
+      font-size: 1.35rem;
       font-weight: bold;
       color: #222;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
     }
     .reward-text {
-      font-size: 1.1rem;
+      font-size: 1.15rem;
       color: #ff4d6d;
       font-weight: bold;
-    }
-    .close-btn {
-      background: #222;
-      color: #fff;
-      border: none;
-      padding: 12px 24px;
-      border-radius: 99px;
-      font-weight: bold;
-      cursor: pointer;
-      font-size: 0.95rem;
     }
   </style>
 </head>
@@ -194,15 +209,19 @@
       <div class="meter-bar" id="meter"></div>
     </div>
 
-    <!-- タッチでもクリックでも確実に動くボタン -->
     <button type="button" class="tap-btn" id="tapButton" onclick="handleTap()">❤️</button>
 
-    <div class="hint-text">▲ ここを連打！！ ▲</div>
+    <div class="hint-text">▲ ここを連打！！（音が出るよ🔊） ▲</div>
   </div>
 
   <!-- 結果モーダル -->
   <div class="modal-overlay" id="modal">
     <div class="modal-card">
+      <!-- 連打場所と絶対に被らない右上配置 -->
+      <div class="modal-top-bar">
+        <button type="button" class="close-btn" id="retryBtn" onclick="resetGame()" disabled>🔄 もう1回挑戦する</button>
+      </div>
+
       <div class="result-badge" id="rankBadge">RANK S</div>
       <div class="time-record">クリアタイム: <span id="finalTime">0.00</span>秒</div>
       
@@ -210,8 +229,6 @@
         <div class="msg-text" id="resultMessage">メッセージ</div>
         <div class="reward-text" id="rewardMessage">🎁 ご褒美: ○○</div>
       </div>
-
-      <button type="button" class="close-btn" onclick="resetGame()">もう1回挑戦する</button>
     </div>
   </div>
 
@@ -221,9 +238,85 @@
     var startTime = 0;
     var timerInterval = null;
     var isFinished = false;
+    var audioCtx = null;
+
+    // サウンド初期化
+    function initAudio() {
+      if (!audioCtx) {
+        var AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (AudioContext) {
+          audioCtx = new AudioContext();
+        }
+      }
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    // タップ時のポップ音（連打するほど音階が上がる！）
+    function playTapSound(tapNum) {
+      if (!audioCtx) return;
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.type = 'sine';
+      // 300Hzからタップごとに少しずつ音が高くなる
+      osc.frequency.setValueAtTime(300 + (tapNum * 32), audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.08);
+    }
+
+    // クリア時の3段階ファンファーレ
+    function playClearSound(rankLevel) {
+      if (!audioCtx) return;
+      var notes = [];
+      if (rankLevel === 3) {
+        // SSSランク：超豪華な6連ファンファーレ！
+        notes = [
+          { f: 523.25, d: 0.08, t: 0.0, type: 'triangle' }, // ド
+          { f: 659.25, d: 0.08, t: 0.09, type: 'triangle' }, // ミ
+          { f: 783.99, d: 0.08, t: 0.18, type: 'triangle' }, // ソ
+          { f: 1046.50, d: 0.12, t: 0.27, type: 'triangle' }, // 高いド
+          { f: 783.99, d: 0.08, t: 0.40, type: 'triangle' }, // ソ
+          { f: 1046.50, d: 0.45, t: 0.50, type: 'triangle' }  // 高いド〜！
+        ];
+      } else if (rankLevel === 2) {
+        // Sランク：キラキラ4連チャイム
+        notes = [
+          { f: 440.00, d: 0.1, t: 0.0, type: 'sine' },
+          { f: 554.37, d: 0.1, t: 0.1, type: 'sine' },
+          { f: 659.25, d: 0.1, t: 0.2, type: 'sine' },
+          { f: 880.00, d: 0.35, t: 0.3, type: 'sine' }
+        ];
+      } else {
+        // Aランク：優しい2音ピンポン♪
+        notes = [
+          { f: 523.25, d: 0.15, t: 0.0, type: 'sine' },
+          { f: 659.25, d: 0.35, t: 0.16, type: 'sine' }
+        ];
+      }
+
+      notes.forEach(function(n) {
+        var osc = audioCtx.createOscillator();
+        var gain = audioCtx.createGain();
+        osc.type = n.type;
+        osc.frequency.setValueAtTime(n.f, audioCtx.currentTime + n.t);
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime + n.t);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + n.t + n.d);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(audioCtx.currentTime + n.t);
+        osc.stop(audioCtx.currentTime + n.t + n.d);
+      });
+    }
 
     function handleTap() {
       if (isFinished) return;
+
+      initAudio();
 
       // 初回タップでタイマースタート
       if (currentTaps === 0) {
@@ -231,10 +324,12 @@
         timerInterval = setInterval(function() {
           var elapsed = (Date.now() - startTime) / 1000;
           document.getElementById('timerDisplay').textContent = elapsed.toFixed(2) + '秒';
-        }, 40);
+        }, 30);
       }
 
       currentTaps++;
+      playTapSound(currentTaps);
+
       var remaining = Math.max(TARGET_TAPS - currentTaps, 0);
       document.getElementById('countDisplay').textContent = '残り ' + remaining + ' タップ！';
 
@@ -252,19 +347,24 @@
         var rank = '';
         var msg = '';
         var reward = '';
+        var rankLevel = 1;
 
-        if (totalTime < 3.2) {
+        // 2.00秒未満でSSSランク！
+        if (totalTime < 2.00) {
           rank = 'RANK SSS 🔥';
           msg = '特別やで';
           reward = '🎁 ご褒美: 添い寝';
-        } else if (totalTime < 5.5) {
+          rankLevel = 3;
+        } else if (totalTime < 3.50) {
           rank = 'RANK S ✨';
           msg = 'こっちこいよ';
           reward = '🎁 ご褒美: ハグ';
+          rankLevel = 2;
         } else {
           rank = 'RANK A 👍';
           msg = 'よく頑張ったね！';
           reward = '🎁 ご褒美: ナデナデ';
+          rankLevel = 1;
         }
 
         document.getElementById('rankBadge').textContent = rank;
@@ -272,9 +372,21 @@
         document.getElementById('resultMessage').textContent = msg;
         document.getElementById('rewardMessage').textContent = reward;
 
+        // クリアファンファーレ再生
+        setTimeout(function() {
+          playClearSound(rankLevel);
+        }, 100);
+
+        // モーダル表示＆1秒間はボタンをロックして誤タップ防止
+        var retryBtn = document.getElementById('retryBtn');
+        retryBtn.disabled = true;
+
         setTimeout(function() {
           document.getElementById('modal').style.display = 'flex';
-        }, 150);
+          setTimeout(function() {
+            retryBtn.disabled = false;
+          }, 1000);
+        }, 120);
       }
     }
 
