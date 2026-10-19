@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Special Mini Game</title>
+  <title>ハート連打チャレンジ！</title>
   <style>
     * {
       box-sizing: border-box;
@@ -32,13 +32,20 @@
       text-align: center;
     }
     h1 {
-      font-size: 1.3rem;
+      font-size: 1.25rem;
       margin-bottom: 8px;
     }
     p.desc {
-      font-size: 0.9rem;
+      font-size: 0.85rem;
       color: #666;
-      margin-bottom: 24px;
+      margin-bottom: 16px;
+    }
+    .timer-display {
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: #ff4d6d;
+      margin-bottom: 16px;
+      height: 28px;
     }
     .meter-container {
       width: 100%;
@@ -53,7 +60,7 @@
       height: 100%;
       width: 0%;
       background: linear-gradient(90deg, #ff758c, #ff4d6d);
-      transition: width 0.1s ease;
+      transition: width 0.08s ease;
     }
     .tap-btn {
       width: 140px;
@@ -62,31 +69,34 @@
       background: #ff4d6d;
       border: 3px solid #222;
       box-shadow: 0 6px 0 #222;
-      font-size: 3rem;
+      font-size: 3.2rem;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       transition: transform 0.05s, box-shadow 0.05s;
       outline: none;
+      -webkit-tap-highlight-color: transparent;
     }
     .tap-btn:active {
       transform: translateY(4px);
       box-shadow: 0 2px 0 #222;
     }
-    /* モーダル（クリア画面） */
+
+    /* 結果モーダル */
     .modal-overlay {
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.4);
+      background: rgba(0, 0, 0, 0.45);
       justify-content: center;
       align-items: center;
       padding: 20px;
+      z-index: 100;
     }
     .modal-card {
       background: #fff;
-      padding: 30px 20px;
+      padding: 28px 20px;
       border-radius: 20px;
       border: 3px solid #222;
       box-shadow: 0 8px 0 #222;
@@ -99,16 +109,43 @@
       0% { transform: scale(0.8); opacity: 0; }
       100% { transform: scale(1); opacity: 1; }
     }
-    .modal-card h2 {
+    .result-badge {
+      display: inline-block;
+      padding: 4px 14px;
+      border-radius: 99px;
+      background: #ffe3e8;
       color: #ff4d6d;
-      margin-bottom: 12px;
+      font-weight: bold;
+      font-size: 0.9rem;
+      margin-bottom: 10px;
     }
-    .modal-card p {
-      font-size: 1rem;
-      line-height: 1.6;
-      color: #333;
-      margin-bottom: 20px;
-      white-space: pre-wrap;
+    .time-record {
+      font-size: 1.05rem;
+      color: #555;
+      margin-bottom: 16px;
+    }
+    .time-record span {
+      font-weight: bold;
+      color: #222;
+      font-size: 1.35rem;
+    }
+    .message-box {
+      background: #fafafa;
+      border: 2px dashed #ff4d6d;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 18px;
+    }
+    .msg-text {
+      font-size: 1.25rem;
+      font-weight: bold;
+      color: #222;
+      margin-bottom: 8px;
+    }
+    .reward-text {
+      font-size: 1.05rem;
+      color: #ff4d6d;
+      font-weight: bold;
     }
     .close-btn {
       background: #222;
@@ -118,6 +155,7 @@
       border-radius: 99px;
       font-weight: bold;
       cursor: pointer;
+      font-size: 0.9rem;
     }
   </style>
 </head>
@@ -125,7 +163,9 @@
 
   <div class="card">
     <h1>ハートを連打して満タンにせよ！</h1>
-    <p class="desc">10回タップでゲージをいっぱいにしてみてね</p>
+    <p class="desc">タップ連打でタイムアタック！</p>
+
+    <div class="timer-display" id="timerDisplay">READY...</div>
 
     <div class="meter-container">
       <div class="meter-bar" id="meter"></div>
@@ -134,39 +174,53 @@
     <button class="tap-btn" id="tapButton">❤️</button>
   </div>
 
-  <!-- クリア時のポップアップ -->
+  <!-- 結果モーダル -->
   <div class="modal-overlay" id="modal">
     <div class="modal-card">
-      <h2>CLEAR!! 🎉</h2>
-      <!-- ここにゆいちゃん向けのメッセージを入れる -->
-      <p id="secretMessage">いつもありがとう！
-クリアおめでとう。今度美味しいものでも食べに行こう！</p>
-      <button class="close-btn" onclick="location.reload()">もう1回遊ぶ</button>
+      <div class="result-badge" id="rankBadge">RANK S</div>
+      <div class="time-record">タイム: <span id="finalTime">0.00</span>秒</div>
+      
+      <div class="message-box">
+        <div class="msg-text" id="resultMessage">メッセージ</div>
+        <div class="reward-text" id="rewardMessage">🎁 ご褒美: ○○</div>
+      </div>
+
+      <button class="close-btn" onclick="location.reload()">もう1回挑戦する</button>
     </div>
   </div>
 
   <script>
-    const TARGET_TAPS = 10; // クリアに必要なタップ回数
+    const TARGET_TAPS = 15; // クリアに必要な連打数
     let currentTaps = 0;
+    let startTime = null;
+    let timerInterval = null;
+    let isFinished = false;
 
     const tapButton = document.getElementById('tapButton');
     const meter = document.getElementById('meter');
+    const timerDisplay = document.getElementById('timerDisplay');
     const modal = document.getElementById('modal');
+    const rankBadge = document.getElementById('rankBadge');
+    const finalTime = document.getElementById('finalTime');
+    const resultMessage = document.getElementById('resultMessage');
+    const rewardMessage = document.getElementById('rewardMessage');
 
     tapButton.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      if (currentTaps < TARGET_TAPS) {
-        currentTaps++;
-        const percent = (currentTaps / TARGET_TAPS) * 100;
-        meter.style.width = percent + '%';
+      if (isFinished) return;
 
-        if (currentTaps >= TARGET_TAPS) {
-          setTimeout(() => {
-            modal.style.display = 'flex';
-          }, 200);
-        }
+      // 初回タップで計測スタート
+      if (currentTaps === 0) {
+        startTime = performance.now();
+        timerInterval = setInterval(() => {
+          const elapsed = (performance.now() - startTime) / 1000;
+          timerDisplay.textContent = elapsed.toFixed(2) + 's';
+        }, 30);
       }
-    });
-  </script>
-</body>
-</html>
+
+      currentTaps++;
+      const percent = Math.min((currentTaps / TARGET_TAPS) * 100, 100);
+      meter.style.width = percent + '%';
+
+      // 満タン判定
+      if (currentTaps >= TARGET_TAPS
